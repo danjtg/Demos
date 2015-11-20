@@ -1,0 +1,74 @@
+#version 400
+
+// define the number of CPs in the output patch
+layout (vertices = 3) out;
+
+layout (std140) uniform Matrices
+{
+	mat4 projectionMatrix;
+	mat4 viewMatrix;
+	mat4 modelMatrix;
+	mat4 projViewModelMatrix;
+	mat4 viewModelMatrix;
+	mat3 normalMatrix;	
+};
+
+// attributes of the input CPs
+in vec3 vNormal[];
+in vec2 vTexCoord[];
+in vec4 vPosition[];
+
+// attributes of the output CPs
+out	vec3 tcNormal[];
+out	vec2 tcTexCoord[];
+out	vec4 tcPosition[];
+
+uniform vec4 camPos;	// Camera Position
+uniform int mode;	// Tesselation in Manual(Keyboard) or Automatic(Distance) Mode
+uniform float tessLevelInner;	// Needed for manual tesselation adjustment
+uniform float tessLevelOuter;	// Needed for manual tesselation adjustment
+
+#define ID gl_InvocationID
+
+// Calculate the tesselation level based on distance
+float GetTessLevel(float Distance0, float Distance1)
+{
+    float AvgDistance = (Distance0 + Distance1) / 2.0;
+	float MaxDist = 10.0;
+
+	// This actually makes the max tesselation level equal to MaxDist
+	// Enough for demo purposes
+	return MaxDist/AvgDistance;
+}
+
+void main()
+{
+	// Set the control points of the output patch
+	tcNormal[ID] = vNormal[ID];
+	tcTexCoord[ID] = vTexCoord[ID];
+	tcPosition[ID] = vPosition[ID];
+
+	// Automatic(Distance based) Tesselation Mode or Manual(keyboard)
+	if(mode == 0)
+	{
+		// Calculate the distance from the camera to the three control points
+		// We bring the vertex positions to world
+		float EyeToVertexDistance0 = distance(camPos, vPosition[0]*modelMatrix);
+		float EyeToVertexDistance1 = distance(camPos, vPosition[1]*modelMatrix);
+		float EyeToVertexDistance2 = distance(camPos, vPosition[2]*modelMatrix);
+
+		// Calculate the tessellation levels
+		gl_TessLevelOuter[0] = GetTessLevel(EyeToVertexDistance1, EyeToVertexDistance2);
+		gl_TessLevelOuter[1] = GetTessLevel(EyeToVertexDistance2, EyeToVertexDistance0);
+		gl_TessLevelOuter[2] = GetTessLevel(EyeToVertexDistance0, EyeToVertexDistance1);
+		gl_TessLevelInner[0] = gl_TessLevelOuter[2];
+	}
+	else
+	{
+		// Set the tessellation levels
+		gl_TessLevelInner[0] = tessLevelInner;
+		gl_TessLevelOuter[0] = tessLevelOuter;
+		gl_TessLevelOuter[1] = tessLevelOuter;
+		gl_TessLevelOuter[2] = tessLevelOuter;
+	}
+}
