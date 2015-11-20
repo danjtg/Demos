@@ -1,0 +1,65 @@
+#version 430
+
+layout (local_size_x = 8, local_size_y = 8, local_size_z = 8) in;
+
+layout(binding = 0) uniform sampler3D redSH;	// redSHCoeffs
+layout(binding = 1) uniform sampler3D greenSH;	// greenSHCoeffs
+layout(binding = 2) uniform sampler3D blueSH;	// blueSHCoeffs
+
+layout(binding = 3, r32ui) uniform uimage3D reflectionTexture;
+layout(binding = 4, rgba16f) uniform image3D reflectionLitTexture;
+
+uniform float gridCellSize;
+uniform vec3 cameraPos;
+
+vec3 GetAmbientIllum(in vec3 elementPos)
+{
+	// get texCoords into 3D texture of propagated virtual point lights
+	vec3 texCoords = elementPos + vec3(0.5f, 0.5f, 0.0f);
+	texCoords /= 256.0f;
+	
+	// Sample red/ green/ blue SH-coeffs trilinearly from the 2D texture arrays and extract ambient light.
+	vec3 vAmbient;
+	vAmbient.r = texture(redSH, texCoords).r;
+	vAmbient.g = texture(greenSH, texCoords).r;
+	vAmbient.b = texture(blueSH, texCoords).r;
+	
+	vAmbient *= 0.8862269262f; // PI/(2*sqrt(PI))
+	
+	return vAmbient;
+}
+
+// Decode specified mask into a float3 color (range 0.0f-1.0f).
+vec3 DecodeColor(in uint colorMask)
+{
+	vec3 color;
+	color.r = (colorMask>>16U) & 0x000000FF;
+	color.g = (colorMask>>8U) & 0x000000FF;
+	color.b = colorMask & 0x000000FF;
+	color /= 255.0f;
+	return color;
+}
+
+void main()
+{ 
+	ivec3 voxelPos = ivec3(gl_GlobalInvocationID);
+	uint iColorOcclusion = imageLoad(reflectionTexture, voxelPos).x;
+
+	// decode color/ occlusion
+	vec4 colorOcclusion = vec4(DecodeColor(iColorOcclusion), iColorOcclusion >> 31U);
+  
+	// ambient lighting    
+	colorOcclusion.rgb *= GetAmbientIllum(vec3(voxelPos));
+
+	// Fade out values with the distance to the grid center. In combination with fading out the traced reflection values later on 
+	// in the same way, this ensures a smooth fade-out of the reflections as the viewer camera moves.
+	ivec3 offset = voxelPos - ivec3(128);
+	vec3 position = offset * gridCellSize;	// CAMERA
+	colorOcclusion.rgb *= 1.0f - clamp(length(position) / (gridCellSize*128.0f), 0.0f, 1.0f);	// CAMERA
+	
+	// write out color/ occlusion
+	imageStore(reflectionLitTexture, voxelPos, colorOcclusion);
+
+	// clear source texture
+	imageStore(reflectionTexture, voxelPos, uvec4(0));
+}
